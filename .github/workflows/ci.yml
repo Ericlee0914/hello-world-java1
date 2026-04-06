@@ -6,10 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # 解决那个 Node.js 20 的警告
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,8 +22,9 @@ jobs:
           distribution: "adopt"
           java-version: "17"
 
+      # 建议在 build 阶段只编译，不跑测试
       - name: Build (without tests)
-        run: gradle clean assemble
+        run: ./gradlew clean assemble 
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -29,10 +32,10 @@ jobs:
           name: build-artifacts
           path: build/libs/*.jar
 
+  # Test 和 Deployment 会在 build 结束后【同时】开始执行
   test:
     runs-on: ubuntu-latest
     needs: build
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -44,27 +47,18 @@ jobs:
           java-version: "17"
 
       - name: Run Unit Tests
-        run: gradle test
-
-      - name: Generate code coverage report
-        run: gradle jacocoTestReport
+        run: ./gradlew test jacocoTestReport # 合并跑，省时间
 
       - name: Upload Test Reports
         uses: actions/upload-artifact@v4
+        if: always() # 就算测试 fail 也要把报告传上来，方便你 debug
         with:
           name: test-reports
           path: build/reports/tests/**
 
-      - name: Upload code coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-coverage-report
-          path: build/reports/jacoco/test/html/**
-
   deployment:
     runs-on: ubuntu-latest
-    needs: [build, test]
-
+    needs: build # 依赖 build 成功后立即开始
     steps:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
@@ -73,4 +67,5 @@ jobs:
           path: build/libs
 
       - name: Run Deployment
+        # 注意：使用通配符 *.jar 时要小心目录里只有一个 jar，不然会报错
         run: java -jar build/libs/*.jar
